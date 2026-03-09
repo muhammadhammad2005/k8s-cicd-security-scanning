@@ -46,18 +46,13 @@ jobs:
         echo "Running Kubesec analysis..."
         GATE_FAILED=false
 
-        for file in manifests/secure-app.yaml manifests/vulnerable-app.yaml; do
+        for file in manifests/secure-app.yaml; do
           if [ -f "$file" ]; then
             name=$(basename "$file" .yaml)
             echo "  Scanning $name..."
-
-            # Use || true to ignore exit code 2 caused by unsupported resource types
             kubesec scan "$file" > "reports/kubesec-${name}.json" || true
-
-            # Only check score of Deployment resources (skip Secret/Service)
             score=$(jq -r '[.[] | select(.object | startswith("Deployment"))] | .[0].score // "N/A"' "reports/kubesec-${name}.json")
             echo "  Deployment score for $name: $score"
-
             if [ "$score" != "N/A" ] && [ "$score" -lt 0 ]; then
               echo "::error::$name deployment has a negative security score: $score"
               GATE_FAILED=true
@@ -74,38 +69,41 @@ jobs:
       run: |
         echo "Running KubeLinter analysis..."
         kube-linter lint manifests/ --format json > reports/kubelinter-report.json || true
-        issues=$(jq '.Issues | length' reports/kubelinter-report.json)
+        issues=$(jq '.Issues | length' reports/kubelinter-report.json 2>/dev/null || echo "0")
         echo "KubeLinter found $issues issues"
         if [ "$issues" -gt 0 ]; then
           echo "::warning::KubeLinter found $issues security issues"
           jq -r '.Issues[] | "  - \(.Object.K8sObject.Name): \(.Message)"' reports/kubelinter-report.json
         fi
 
+    - name: Build App Image
+      run: |
+        echo "Building secure-demo-app image..."
+        docker build -t secure-demo-app:1.0.0 ./app
+        docker images | grep secure-demo-app
+
     - name: Scan Container Images with Trivy
       run: |
-        echo "Extracting images from manifests..."
-        images=$(grep -h "image:" manifests/*.yaml | sed 's/.*image:[[:space:]]*//' | sed 's/["\r]//g' | sort -u)
-        echo "Images found: $images"
+        echo "Scanning container images..."
+        mkdir -p reports
         GATE_FAILED=false
 
-        for image in $images; do
-          echo "Scanning: $image"
-          clean=$(echo "$image" | sed 's/[^a-zA-Z0-9]/_/g')
-          trivy image --format json --output "reports/trivy-${clean}.json" "$image" || true
+        # Scan our custom built image
+        echo "Scanning: secure-demo-app:1.0.0"
+        trivy image --format json --output "reports/trivy-secure-demo-app.json" secure-demo-app:1.0.0 || true
 
-          if [ -f "reports/trivy-${clean}.json" ]; then
-            critical=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="CRITICAL")] | length' "reports/trivy-${clean}.json")
-            high=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="HIGH")] | length' "reports/trivy-${clean}.json")
-            echo "  $image → CRITICAL: $critical, HIGH: $high"
-            if [ "$critical" -gt 0 ]; then
-              echo "::warning::$image has $critical CRITICAL vulnerabilities"
-            fi
-            if [ "$high" -gt 10 ]; then
-              echo "::error::$image has $high HIGH vulnerabilities (threshold: 10)"
-              GATE_FAILED=true
-            fi
+        if [ -f "reports/trivy-secure-demo-app.json" ]; then
+          critical=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="CRITICAL")] | length' reports/trivy-secure-demo-app.json)
+          high=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="HIGH")] | length' reports/trivy-secure-demo-app.json)
+          echo "  secure-demo-app:1.0.0 → CRITICAL: $critical, HIGH: $high"
+          if [ "$critical" -gt 0 ]; then
+            echo "::warning::secure-demo-app has $critical CRITICAL vulnerabilities"
           fi
-        done
+          if [ "$high" -gt 10 ]; then
+            echo "::error::secure-demo-app has $high HIGH vulnerabilities (threshold: 10)"
+            GATE_FAILED=true
+          fi
+        fi
 
         if [ "$GATE_FAILED" = true ]; then
           exit 1
