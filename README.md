@@ -125,7 +125,7 @@ The CI/CD pipeline enforces rules:
 ### Step 1 — Clone the repo
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/k8s-cicd-security-scanning.git
+git clone https://github.com/muhammadhammad2005/k8s-cicd-security-scanning.git
 cd k8s-cicd-security-scanning
 ```
 
