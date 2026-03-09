@@ -1,0 +1,17 @@
+{
+  "name": "secure-demo-app",
+  "version": "1.0.0",
+  "description": "A minimal Node.js demo app for Kubernetes security scanning lab",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

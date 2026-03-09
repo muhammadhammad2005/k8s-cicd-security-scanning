@@ -1,0 +1,15 @@
+checks:
+  doNotAutoMount: true
+  noReadOnlyRootFilesystem: true
+  privilegedContainer: true
+  runAsNonRoot: true
+  sensitiveContainerEnvVar: true
+  cpuRequirements: true
+  memoryRequirements: true
+  livenessProbe: true
+  readinessProbe: true
+  hostNetwork: true
+  hostPID: true
+  hostIPC: true
+
+customChecks: []

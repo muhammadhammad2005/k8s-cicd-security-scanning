@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: allowed-registries
+  namespace: kube-system
+data:
+  registries.yaml: |
+    allowed_registries:
+      - docker.io
+      - gcr.io
+      - quay.io
+      - registry.k8s.io
+    blocked_registries:
+      - untrusted-registry.com
+    require_signature: false
+    max_vulnerability_score: 7.0

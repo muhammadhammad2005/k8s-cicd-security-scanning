@@ -1,0 +1,21 @@
+# Reports (generated at runtime)
+reports/*.json
+reports/*.txt
+reports/*.sarif
+
+# Node
+app/node_modules/
+app/npm-debug.log
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
