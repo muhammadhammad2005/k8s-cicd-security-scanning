@@ -17,13 +17,8 @@ jobs:
 
     - name: Install Kubesec
       run: |
-        KUBESEC_URL=$(curl -sSf https://api.github.com/repos/controlplaneio/kubesec/releases/latest \
-          | grep browser_download_url \
-          | grep linux-amd64 \
-          | cut -d '"' -f 4)
-        echo "Downloading kubesec from: $KUBESEC_URL"
-        curl -sSL "$KUBESEC_URL" -o kubesec
-        chmod +x kubesec
+        curl -sSL https://github.com/controlplaneio/kubesec/releases/download/v2.13.0/kubesec_linux_amd64.tar.gz \
+          | tar xz kubesec
         sudo mv kubesec /usr/local/bin/
         kubesec version
 
