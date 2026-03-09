@@ -50,7 +50,6 @@ jobs:
         mkdir -p reports
         echo "Running Kubesec analysis..."
         GATE_FAILED=false
-
         for file in manifests/*.yaml; do
           if [ -f "$file" ]; then
             filename=$(basename "$file" .yaml)
@@ -58,16 +57,13 @@ jobs:
             kubesec scan "$file" > "reports/kubesec-${filename}.json"
             score=$(jq -r '.[0].score // "N/A"' "reports/kubesec-${filename}.json")
             echo "  Score for $filename: $score"
-
             if [ "$score" != "N/A" ] && [ "$score" -lt 0 ]; then
               echo "::error::$filename has a negative security score: $score"
               GATE_FAILED=true
             fi
           fi
         done
-
         if [ "$GATE_FAILED" = true ]; then
-          echo "Kubesec gate failed - negative scores detected"
           exit 1
         fi
 
@@ -86,21 +82,16 @@ jobs:
       run: |
         echo "Extracting images from manifests..."
         images=$(grep -h "image:" manifests/*.yaml | sed 's/.*image:[[:space:]]*//' | sed 's/["\r]//g' | sort -u)
-        echo "Images found:"
-        echo "$images"
-
+        echo "Images found: $images"
         GATE_FAILED=false
-
         for image in $images; do
           echo "Scanning: $image"
           clean=$(echo "$image" | sed 's/[^a-zA-Z0-9]/_/g')
           trivy image --format json --output "reports/trivy-${clean}.json" "$image" || true
-
           if [ -f "reports/trivy-${clean}.json" ]; then
             critical=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="CRITICAL")] | length' "reports/trivy-${clean}.json")
             high=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="HIGH")] | length' "reports/trivy-${clean}.json")
             echo "  $image → CRITICAL: $critical, HIGH: $high"
-
             if [ "$critical" -gt 0 ]; then
               echo "::warning::$image has $critical CRITICAL vulnerabilities"
             fi
@@ -110,9 +101,7 @@ jobs:
             fi
           fi
         done
-
         if [ "$GATE_FAILED" = true ]; then
-          echo "Trivy gate failed - too many high vulnerabilities"
           exit 1
         fi
 
@@ -144,117 +133,3 @@ jobs:
           echo "Trivy   | $name | CRITICAL: $critical HIGH: $high"
         done
         echo "=============================="
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  static-analysis:
-    runs-on: ubuntu-latest
-    name: Static Security Analysis
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup tools
-      run: |
-        curl -sSX GET https://api.github.com/repos/controlplaneio/kubesec/releases/latest \
-          | grep browser_download_url \
-          | grep linux-amd64 \
-          | cut -d '"' -f 4 \
-          | xargs curl -sSL -o kubesec
-        chmod +x kubesec
-        sudo mv kubesec /usr/local/bin/
-        
-        curl -L https://github.com/stackrox/kube-linter/releases/download/0.6.8/kube-linter-linux.tar.gz \
-          | tar xz
-        sudo mv kube-linter /usr/local/bin/
-        
-        sudo apt-get update
-        sudo apt-get install wget apt-transport-https gnupg lsb-release -y
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-        echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-        sudo apt-get update
-        sudo apt-get install trivy -y
-    
-    - name: Run Kubesec Analysis
-      run: |
-        mkdir -p reports
-        for file in manifests/*.yaml; do
-          if [ -f "$file" ]; then
-            filename=$(basename "$file" .yaml)
-            kubesec scan "$file" > "reports/kubesec-$filename.json"
-            score=$(cat "reports/kubesec-$filename.json" | jq -r '.[0].score // "N/A"')
-            echo "Security score for $filename: $score"
-            if [ "$score" != "N/A" ] && [ "$score" -lt 0 ]; then
-              echo "::error::$filename has a negative security score: $score"
-              exit 1
-            fi
-          fi
-        done
-    
-    - name: Run KubeLinter Analysis
-      run: |
-        kube-linter lint manifests/ --format json > reports/kubelinter-report.json
-        issues=$(cat reports/kubelinter-report.json | jq '.Issues | length')
-        echo "KubeLinter found $issues issues"
-        if [ "$issues" -gt 0 ]; then
-          echo "::warning::KubeLinter found $issues security issues"
-          cat reports/kubelinter-report.json | jq -r '.Issues[] | "::warning::\(.Object.K8sObject.Name): \(.Message)"'
-        fi
-    
-    - name: Extract and Scan Container Images
-      run: |
-        images=$(grep -h "image:" manifests/*.yaml | sed 's/.*image: *//' | sed 's/["\r]//g' | sort -u)
-        for image in $images; do
-          echo "Scanning image: $image"
-          clean_name=$(echo $image | sed 's/[^a-zA-Z0-9]/_/g')
-          trivy image --format json "$image" > "reports/trivy-$clean_name.json"
-          high_critical=$(trivy image --format json "$image" | jq -r '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length')
-          echo "High/Critical vulnerabilities in $image: $high_critical"
-          if [ "$high_critical" -gt 10 ]; then
-            echo "::error::Image $image has $high_critical high/critical vulnerabilities"
-            exit 1
-          elif [ "$high_critical" -gt 0 ]; then
-            echo "::warning::Image $image has $high_critical high/critical vulnerabilities"
-          fi
-        done
-    
-    - name: Upload Security Reports
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: security-reports
-        path: reports/
-        retention-days: 30
-    
-    - name: Security Gate Check
-      run: |
-        failed=false
-        for file in reports/kubesec-*.json; do
-          if [ -f "$file" ]; then
-            score=$(cat "$file" | jq -r '.[0].score // "N/A"')
-            if [ "$score" != "N/A" ] && [ "$score" -lt 0 ]; then
-              echo "FAIL: Negative security score found"
-              failed=true
-            fi
-          fi
-        done
-        for file in reports/trivy-*.json; do
-          if [ -f "$file" ]; then
-            high_critical=$(cat "$file" | jq -r '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length')
-            if [ "$high_critical" -gt 10 ]; then
-              echo "FAIL: Too many high/critical vulnerabilities: $high_critical"
-              failed=true
-            fi
-          fi
-        done
-        if [ "$failed" = true ]; then
-          echo "Security gate check failed!"
-          exit 1
-        else
-          echo "Security gate check passed!"
-        fi
