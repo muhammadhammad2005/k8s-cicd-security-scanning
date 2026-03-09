@@ -45,20 +45,27 @@ jobs:
         mkdir -p reports
         echo "Running Kubesec analysis..."
         GATE_FAILED=false
-        for file in manifests/*.yaml; do
+
+        # Only scan Deployment-type manifests - kubesec does not support NetworkPolicy
+        SUPPORTED=("secure-app.yaml" "vulnerable-app.yaml")
+
+        for filename in "${SUPPORTED[@]}"; do
+          file="manifests/$filename"
           if [ -f "$file" ]; then
-            filename=$(basename "$file" .yaml)
-            echo "  Scanning $filename..."
-            kubesec scan "$file" > "reports/kubesec-${filename}.json"
-            score=$(jq -r '.[0].score // "N/A"' "reports/kubesec-${filename}.json")
-            echo "  Score for $filename: $score"
+            name=$(basename "$file" .yaml)
+            echo "  Scanning $name..."
+            kubesec scan "$file" > "reports/kubesec-${name}.json"
+            score=$(jq -r '.[0].score // "N/A"' "reports/kubesec-${name}.json")
+            echo "  Score for $name: $score"
             if [ "$score" != "N/A" ] && [ "$score" -lt 0 ]; then
-              echo "::error::$filename has a negative security score: $score"
+              echo "::error::$name has a negative security score: $score"
               GATE_FAILED=true
             fi
           fi
         done
+
         if [ "$GATE_FAILED" = true ]; then
+          echo "Kubesec gate failed - negative scores detected"
           exit 1
         fi
 
@@ -79,10 +86,12 @@ jobs:
         images=$(grep -h "image:" manifests/*.yaml | sed 's/.*image:[[:space:]]*//' | sed 's/["\r]//g' | sort -u)
         echo "Images found: $images"
         GATE_FAILED=false
+
         for image in $images; do
           echo "Scanning: $image"
           clean=$(echo "$image" | sed 's/[^a-zA-Z0-9]/_/g')
           trivy image --format json --output "reports/trivy-${clean}.json" "$image" || true
+
           if [ -f "reports/trivy-${clean}.json" ]; then
             critical=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="CRITICAL")] | length' "reports/trivy-${clean}.json")
             high=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="HIGH")] | length' "reports/trivy-${clean}.json")
@@ -96,6 +105,7 @@ jobs:
             fi
           fi
         done
+
         if [ "$GATE_FAILED" = true ]; then
           exit 1
         fi
