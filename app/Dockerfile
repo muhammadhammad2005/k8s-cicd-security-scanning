@@ -1,5 +1,8 @@
 # ---- Build Stage ----
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
+
+# Upgrade all alpine packages to patch OS-level CVEs
+RUN apk upgrade --no-cache
 
 WORKDIR /app
 
@@ -9,7 +12,10 @@ RUN npm ci --omit=dev
 COPY . .
 
 # ---- Production Stage ----
-FROM node:18-alpine AS production
+FROM node:20-alpine AS production
+
+# Upgrade all alpine packages to patch OS-level CVEs
+RUN apk upgrade --no-cache
 
 # Security: create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
