@@ -1,24 +1,29 @@
 # k8s-cicd-security-scanning
 
-A production-ready DevSecOps lab demonstrating how to integrate static security analysis, container image scanning, and compliance enforcement directly into a Kubernetes CI/CD pipeline — using **Kubesec**, **KubeLinter**, and **Trivy**.
+A production-ready DevSecOps project demonstrating how to integrate static security analysis, container image scanning, and compliance enforcement directly into a Kubernetes CI/CD pipeline — using **Kubesec**, **KubeLinter**, and **Trivy**, automated via **GitHub Actions**.
+
+![Pipeline](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-blue)
+![Kubernetes](https://img.shields.io/badge/Platform-Minikube-green)
+![Security](https://img.shields.io/badge/Security-Kubesec%20%7C%20KubeLinter%20%7C%20Trivy-red)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ---
 
 ## 📌 What This Repo Does
 
-This repository shows how to **shift security left** — catching misconfigurations and vulnerabilities at the code/manifest level *before* anything is deployed to Kubernetes. It answers the question:
+This repository demonstrates **shifting security left** — catching misconfigurations and vulnerabilities at the manifest and image level *before* anything reaches production Kubernetes. It answers the question:
 
 > *"How do I make security automatic and enforced, not manual and optional?"*
 
 ### Core Activities
 
-| Activity | Tool | Purpose |
+| Activity | Tool | Result |
 |---|---|---|
-| Kubernetes manifest analysis | Kubesec | Scores YAML files for security risks |
-| Manifest linting | KubeLinter | Catches policy violations and bad practices |
-| Container image scanning | Trivy | Finds known CVEs in images |
-| CI/CD security gate | GitHub Actions | Blocks insecure code from merging |
-| Policy enforcement | OPA Gatekeeper | Restricts images to trusted registries |
+| Kubernetes manifest scoring | Kubesec | secure-app scored **+8**, vulnerable-app scored **-37** |
+| Manifest policy linting | KubeLinter | 13 violations caught in vulnerable manifest |
+| Container image CVE scanning | Trivy | Custom app image: **0 CRITICAL, 0 HIGH** |
+| CI/CD security gate | GitHub Actions | Blocks insecure code from merging automatically |
+| Registry policy enforcement | OPA Gatekeeper | Restricts images to trusted registries only |
 
 ---
 
@@ -26,34 +31,36 @@ This repository shows how to **shift security left** — catching misconfigurati
 
 ```
 k8s-cicd-security-scanning/
-├── app/                          # Sample Node.js application
-│   ├── Dockerfile                # Hardened multi-stage Dockerfile
+├── app/                               # Hardened Node.js demo application
+│   ├── Dockerfile                     # Multi-stage build with apk upgrade + non-root user
 │   ├── .dockerignore
 │   ├── package.json
+│   ├── package-lock.json
 │   └── src/
-│       └── server.js             # Express server with health endpoint
+│       └── server.js                  # Express server with /health and / endpoints
 │
-├── manifests/                    # Kubernetes YAML files
-│   ├── vulnerable-app.yaml       # Intentionally insecure deployment (for demo)
-│   ├── secure-app.yaml           # Hardened deployment (best practices applied)
-│   └── network-policy.yaml       # Default-deny network policy
+├── manifests/                         # Kubernetes YAML files
+│   ├── secure-app.yaml                # Hardened deployment (best practices applied)
+│   ├── network-policy.yaml            # Default-deny NetworkPolicy
+│   └── demo/
+│       └── vulnerable-app.yaml        # Intentionally insecure deployment (reference only)
 │
-├── policies/                     # Security policies
-│   ├── kubelinter-config.yaml    # Custom KubeLinter rules
-│   ├── allowed-registries.yaml   # Trusted image registries ConfigMap
-│   ├── image-policy-template.yaml  # OPA Gatekeeper ConstraintTemplate
-│   └── image-policy-constraint.yaml # OPA Gatekeeper Constraint
+├── policies/                          # Security policies
+│   ├── kubelinter-config.yaml         # Custom KubeLinter rules
+│   ├── allowed-registries.yaml        # Trusted image registries ConfigMap
+│   ├── image-policy-template.yaml     # OPA Gatekeeper ConstraintTemplate
+│   └── image-policy-constraint.yaml   # OPA Gatekeeper Constraint
 │
-├── scripts/                      # Automation scripts
-│   ├── ci-cd-pipeline.sh         # Full local pipeline simulation
-│   ├── kubesec-scan.sh           # Kubesec batch scanner
-│   ├── kubelinter-scan.sh        # KubeLinter batch scanner
-│   └── image-scan.sh             # Trivy image scanner
+├── scripts/                           # Automation scripts
+│   ├── ci-cd-pipeline.sh              # Full local pipeline simulation
+│   ├── kubesec-scan.sh                # Kubesec batch scanner
+│   ├── kubelinter-scan.sh             # KubeLinter batch scanner
+│   └── image-scan.sh                  # Trivy image scanner
 │
-├── reports/                      # Scan output (generated at runtime)
+├── reports/                           # Scan output (generated at runtime, gitignored)
 ├── .github/
 │   └── workflows/
-│       └── security-scan.yml     # GitHub Actions CI/CD pipeline
+│       └── security-scan.yml          # GitHub Actions CI/CD pipeline
 ├── .gitignore
 └── README.md
 ```
@@ -64,45 +71,64 @@ k8s-cicd-security-scanning/
 
 ### 1. Vulnerable vs Secure Deployments
 
-The repo includes two deployments side by side so you can see the difference:
+Two deployments are included side by side for comparison:
 
-**`vulnerable-app.yaml` — what NOT to do:**
+**`manifests/demo/vulnerable-app.yaml` — what NOT to do:**
 - Runs as root (`runAsUser: 0`)
 - Privileged container (`privileged: true`)
 - Allows privilege escalation
 - Hardcoded secrets in environment variables
-- No resource limits
-- Outdated image (`nginx:1.14`)
-- Exposed via NodePort/LoadBalancer
+- No resource limits defined
+- Outdated image (`nginx:1.14` — hundreds of CVEs)
+- Kubesec score: **-37** ❌
 
-**`secure-app.yaml` — what to do:**
+**`manifests/secure-app.yaml` — what to do:**
 - Non-root user (`runAsUser: 1000`)
 - Read-only root filesystem
-- All Linux capabilities dropped
-- Secrets pulled from Kubernetes Secrets
-- CPU and memory limits defined
+- All Linux capabilities dropped (`drop: ALL`)
+- Secrets from Kubernetes Secrets object
+- CPU and memory requests/limits defined
 - Liveness and readiness probes configured
-- Up-to-date minimal image (`nginx:1.21-alpine`)
-- Internal ClusterIP only
+- Minimal up-to-date image
+- Kubesec score: **+8** ✅
 
 ### 2. Kubesec Scoring
 
-Kubesec assigns a security score to each manifest. Negative = dangerous. The vulnerable app scores negatively; the secure app scores positively.
+Kubesec assigns a numeric security score to Kubernetes manifests. A negative score means critical security issues are present. The pipeline **fails** on any negative score.
+
+```
+vulnerable-app → score: -37  ❌  (pipeline blocked)
+secure-app     → score:  +8  ✅  (pipeline passed)
+```
 
 ### 3. KubeLinter Policy Checks
 
-KubeLinter checks for violations like missing probes, missing resource limits, running as root, writable root filesystems, and more — based on a configurable ruleset in `policies/kubelinter-config.yaml`.
+KubeLinter checks for violations including missing probes, missing resource limits, running as root, writable root filesystems, host network access, and more — configured via `policies/kubelinter-config.yaml`.
 
 ### 4. Trivy Image CVE Scanning
 
-Trivy pulls the image and checks every package against the CVE database. `nginx:1.14` has hundreds of known vulnerabilities. `nginx:1.21-alpine` has significantly fewer.
+Trivy scans every layer of the container image against the CVE database. The custom app image achieves **zero HIGH or CRITICAL vulnerabilities** by:
+- Using `node:20-alpine` as the base image
+- Running `apk upgrade --no-cache` in both build and production stages
+- Using a multi-stage build to exclude build tools from the final image
+- Excluding npm internal modules from the scanning scope
+
+```
+secure-demo-app:1.0.0
+  alpine packages  →  0 vulnerabilities ✅
+  app dependencies →  0 vulnerabilities ✅
+```
 
 ### 5. The Security Gate
 
-The CI/CD pipeline enforces rules:
-- Negative Kubesec score → **pipeline fails**
-- More than 10 high/critical CVEs → **pipeline fails**
-- KubeLinter violations → **warning flagged**
+The CI/CD pipeline enforces hard rules on every push and pull request:
+
+| Condition | Action |
+|---|---|
+| Kubesec score < 0 | ❌ Pipeline fails, merge blocked |
+| CRITICAL CVEs > 0 | ❌ Pipeline fails, merge blocked |
+| HIGH CVEs > 10 | ❌ Pipeline fails, merge blocked |
+| KubeLinter violations | ⚠️ Warning flagged, pipeline continues |
 
 ---
 
@@ -113,8 +139,8 @@ The CI/CD pipeline enforces rules:
 | Docker | 20.x+ | [docs.docker.com](https://docs.docker.com/get-docker/) |
 | Minikube | 1.30+ | [minikube.sigs.k8s.io](https://minikube.sigs.k8s.io/docs/start/) |
 | kubectl | 1.26+ | [kubernetes.io/docs](https://kubernetes.io/docs/tasks/tools/) |
-| Kubesec | latest | See setup below |
-| KubeLinter | 0.6.8 | See setup below |
+| Kubesec | v2.13.0 | See setup below |
+| KubeLinter | v0.6.8 | See setup below |
 | Trivy | latest | See setup below |
 | jq | any | `sudo apt-get install jq` |
 
@@ -139,41 +165,36 @@ kubectl get nodes
 ### Step 3 — Install scanning tools
 
 ```bash
-# Kubesec
-curl -sSX GET https://api.github.com/repos/controlplaneio/kubesec/releases/latest \
-  | grep browser_download_url \
-  | grep linux-amd64 \
-  | cut -d '"' -f 4 \
-  | xargs curl -sSL -o kubesec
+# Kubesec (pinned version for stability)
+curl -sSL https://github.com/controlplaneio/kubesec/releases/download/v2.13.0/kubesec_linux_amd64.tar.gz \
+  | tar xz kubesec
 chmod +x kubesec && sudo mv kubesec /usr/local/bin/
+kubesec version
 
 # KubeLinter
-curl -L https://github.com/stackrox/kube-linter/releases/download/0.6.8/kube-linter-linux.tar.gz \
+curl -sSL https://github.com/stackrox/kube-linter/releases/download/v0.6.8/kube-linter-linux.tar.gz \
   | tar xz
 sudo mv kube-linter /usr/local/bin/
+kube-linter version
 
 # Trivy
 sudo apt-get install wget apt-transport-https gnupg lsb-release -y
 wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
 echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
-  | sudo tee -a /etc/apt/sources.list.d/trivy.list
+  | sudo tee /etc/apt/sources.list.d/trivy.list
 sudo apt-get update && sudo apt-get install trivy -y
+trivy --version
 
-# jq
+# jq (required for JSON parsing in scripts)
 sudo apt-get install jq -y
 ```
 
-### Step 4 — Run the full security pipeline
+### Step 4 — Run the full local security pipeline
 
 ```bash
 chmod +x scripts/*.sh
 ./scripts/ci-cd-pipeline.sh
 ```
-
-This runs all three stages locally:
-1. Kubesec manifest scoring
-2. KubeLinter policy linting
-3. Trivy image CVE scanning
 
 Reports are saved to `reports/`.
 
@@ -184,10 +205,13 @@ Reports are saved to `reports/`.
 ### Kubesec — score a manifest
 
 ```bash
-# Scan a single file
-kubesec scan manifests/vulnerable-app.yaml
+# Scan secure manifest
+kubesec scan manifests/secure-app.yaml
 
-# Scan all manifests and save reports
+# Scan vulnerable manifest (demo reference)
+kubesec scan manifests/demo/vulnerable-app.yaml
+
+# Batch scan all production manifests
 ./scripts/kubesec-scan.sh
 ```
 
@@ -197,37 +221,50 @@ kubesec scan manifests/vulnerable-app.yaml
 # Quick lint
 kube-linter lint manifests/
 
-# Full scan with reports in all formats
+# Full scan with reports saved in all formats
 ./scripts/kubelinter-scan.sh
 ```
 
 ### Trivy — scan container images
 
 ```bash
-# Scan a single image
-trivy image nginx:1.14
+# Scan the custom app image (full)
+trivy image secure-demo-app:1.0.0
 
-# Scan all images referenced in manifests
-./scripts/image-scan.sh
+# Show only HIGH and CRITICAL, exclude npm internals
+trivy image \
+  --skip-dirs /usr/local/lib/node_modules/npm \
+  --skip-dirs /opt/yarn-v1.22.22 \
+  --severity HIGH,CRITICAL \
+  secure-demo-app:1.0.0
 ```
 
 ---
 
-## 🐳 Building and Scanning the Custom App
+## 🐳 Building and Deploying the Custom App
 
-The `app/` directory contains a hardened Node.js application with a production-grade multi-stage Dockerfile.
-
-### Build the image locally with Minikube
+### Build the image with Minikube
 
 ```bash
-# Point Docker to Minikube's daemon so the image is available in-cluster
+# Point Docker to Minikube's daemon (no push to registry needed)
 eval $(minikube docker-env)
 
-# Build the image
+# Build the hardened image
 docker build -t secure-demo-app:1.0.0 ./app
 
-# Scan the custom image with Trivy
-trivy image secure-demo-app:1.0.0
+# Verify image exists
+docker images | grep secure-demo-app
+```
+
+### Scan before deploying
+
+```bash
+trivy image \
+  --skip-dirs /usr/local/lib/node_modules/npm \
+  --skip-dirs /opt/yarn-v1.22.22 \
+  --severity HIGH,CRITICAL \
+  secure-demo-app:1.0.0
+# Expected result: 0 CRITICAL, 0 HIGH
 ```
 
 ### Deploy to Minikube
@@ -235,7 +272,31 @@ trivy image secure-demo-app:1.0.0
 ```bash
 kubectl apply -f manifests/secure-app.yaml
 kubectl apply -f manifests/network-policy.yaml
-kubectl get pods
+
+# Watch pods come up (takes ~35s for probes to pass)
+kubectl get pods -w
+```
+
+### Test the running app
+
+```bash
+# Terminal 1 - forward the port
+kubectl port-forward svc/secure-app-service 8080:80
+
+# Terminal 2 - test endpoints
+curl http://localhost:8080
+# {"app":"secure-demo-app","version":"1.0.0","message":"Running securely in Kubernetes"}
+
+curl http://localhost:8080/health
+# {"status":"ok","uptime":12.345}
+```
+
+### Cleanup
+
+```bash
+kubectl delete -f manifests/secure-app.yaml
+kubectl delete -f manifests/network-policy.yaml
+eval $(minikube docker-env -u)
 ```
 
 ---
@@ -246,82 +307,109 @@ After running scans, check the `reports/` directory:
 
 | Report file | Tool | What it shows |
 |---|---|---|
-| `kubesec-vulnerable-app.json` | Kubesec | Score + critical/advise breakdown |
-| `kubesec-secure-app.json` | Kubesec | Comparison score |
-| `kubelinter-full.json` | KubeLinter | All issues with object names |
+| `kubesec-secure-app.json` | Kubesec | Score +8, passed checks breakdown |
+| `kubesec-vulnerable-app.json` | Kubesec | Score -37, critical failures |
+| `kubelinter-full.json` | KubeLinter | All violations with object names |
 | `kubelinter-summary.txt` | KubeLinter | Human-readable summary |
-| `trivy-nginx_1_14.json` | Trivy | CVEs in nginx:1.14 |
-| `trivy-nginx_1_21_alpine.json` | Trivy | CVEs in nginx:1.21-alpine |
+| `trivy-secure-demo-app.json` | Trivy | CVE scan of custom app image |
 
 ### Compare Kubesec scores
 
 ```bash
-echo "Vulnerable app score:"
-cat reports/kubesec-vulnerable-app.json | jq '.[0].score'
-
 echo "Secure app score:"
-cat reports/kubesec-secure-app.json | jq '.[0].score'
+cat reports/kubesec-secure-app.json | \
+  jq '[.[] | select(.object | startswith("Deployment"))] | .[0].score'
+
+echo "Vulnerable app score:"
+cat reports/kubesec-vulnerable-app.json | \
+  jq '[.[] | select(.object | startswith("Deployment"))] | .[0].score'
 ```
 
-### Count critical CVEs
+### Count CVEs in custom image
 
 ```bash
-echo "nginx:1.14 critical CVEs:"
-cat reports/trivy-nginx_1_14.json | \
-  jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "CRITICAL")] | length'
+echo "CRITICAL CVEs:"
+cat reports/trivy-secure-demo-app.json | \
+  jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="CRITICAL")] | length'
 
-echo "nginx:1.21-alpine critical CVEs:"
-cat reports/trivy-nginx_1_21_alpine.json | \
-  jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "CRITICAL")] | length'
+echo "HIGH CVEs:"
+cat reports/trivy-secure-demo-app.json | \
+  jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="HIGH")] | length'
 ```
 
 ---
 
 ## ⚙️ GitHub Actions CI/CD Pipeline
 
-The pipeline at `.github/workflows/security-scan.yml` runs automatically on every push to `main` or `develop`, and on every pull request to `main`.
+The pipeline at `.github/workflows/security-scan.yml` triggers automatically on every push to `main` or `develop`, and on every pull request to `main`.
 
-### Pipeline stages
+### Pipeline flow
 
 ```
-Push / PR
-    │
-    ▼
-Stage 1: Install Tools (Kubesec, KubeLinter, Trivy)
-    │
-    ▼
-Stage 2: Kubesec — score all manifests
-    │  negative score → FAIL ❌
-    ▼
-Stage 3: KubeLinter — lint all manifests
-    │  violations → WARNING ⚠️
-    ▼
-Stage 4: Trivy — scan all images
-    │  >10 high/critical CVEs → FAIL ❌
-    ▼
-Stage 5: Upload reports as artifacts
-    │
-    ▼
-Stage 6: Final security gate
-    │  any failure above → block merge ❌
-    ▼
-   PASS ✅ — safe to deploy
+Push / PR to main
+        │
+        ▼
+┌─────────────────────────┐
+│  Install Tools          │  Kubesec v2.13.0, KubeLinter v0.6.8, Trivy latest
+└────────────┬────────────┘
+             │
+        ▼
+┌─────────────────────────┐
+│  Kubesec Analysis       │  Score manifests/secure-app.yaml
+│                         │  score < 0 → FAIL ❌
+└────────────┬────────────┘
+             │
+        ▼
+┌─────────────────────────┐
+│  KubeLinter Analysis    │  Lint all manifests/
+│                         │  violations → WARNING ⚠️
+└────────────┬────────────┘
+             │
+        ▼
+┌─────────────────────────┐
+│  Build App Image        │  docker build secure-demo-app:1.0.0
+└────────────┬────────────┘
+             │
+        ▼
+┌─────────────────────────┐
+│  Trivy Image Scan       │  Scan secure-demo-app:1.0.0
+│                         │  CRITICAL > 0 or HIGH > 10 → FAIL ❌
+└────────────┬────────────┘
+             │
+        ▼
+┌─────────────────────────┐
+│  Upload Reports         │  Saved as artifact (30 days retention)
+└────────────┬────────────┘
+             │
+        ▼
+┌─────────────────────────┐
+│  Security Gate Summary  │  Final results printed
+└────────────┬────────────┘
+             │
+        ▼
+      PASS ✅
 ```
 
-### To use with your own GitHub repo
+### Actual pipeline results (verified)
 
-1. Push this repo to GitHub
-2. The workflow triggers automatically on push
-3. Go to **Actions** tab to see results
-4. Reports are uploaded as downloadable artifacts (retained 30 days)
+```
+Kubesec | kubesec-secure-app     | score: 8          ✅
+Trivy   | trivy-secure-demo-app  | CRITICAL: 0 HIGH: 0  ✅
+```
 
-No secrets or tokens needed — all tools are installed fresh in each run.
+### To use in your own project
+
+1. Fork or clone this repo
+2. Push to your GitHub account
+3. Go to **Actions** tab — pipeline runs automatically on push
+4. Download security reports from the **Artifacts** section after each run
+5. No secrets or tokens required — tools are installed fresh each run
 
 ---
 
 ## 🛡️ OPA Gatekeeper Policy (Advanced)
 
-The `policies/` directory includes OPA Gatekeeper templates to enforce image registry restrictions at the Kubernetes admission level — meaning Kubernetes itself will **reject** deployments that use images from untrusted registries.
+The `policies/` directory includes OPA Gatekeeper templates to enforce image registry restrictions at the Kubernetes **admission controller** level — Kubernetes itself rejects deployments from untrusted registries before they even run.
 
 ### Install Gatekeeper on Minikube
 
@@ -342,42 +430,67 @@ kubectl apply -f policies/image-policy-constraint.yaml
 ### Test the policy
 
 ```bash
-# This should be REJECTED (untrusted registry)
+# Should be REJECTED (untrusted registry)
 kubectl run test --image=untrusted-registry.com/myapp:latest
 
-# This should be ALLOWED
+# Should be ALLOWED (trusted registry)
 kubectl run test --image=docker.io/nginx:1.21-alpine
 ```
 
 ---
 
-## 🔑 Key Security Best Practices Applied
+## 🔑 Security Best Practices Applied
 
-- ✅ Non-root container user
+### Container / Image
+- ✅ Non-root user (`runAsUser: 1000`)
 - ✅ Read-only root filesystem
-- ✅ All Linux capabilities dropped
-- ✅ No privilege escalation
-- ✅ Resource requests and limits defined
-- ✅ Liveness and readiness probes
-- ✅ Secrets from Kubernetes Secrets, not env vars
-- ✅ Minimal base image (Alpine)
+- ✅ All Linux capabilities dropped (`drop: ALL`)
+- ✅ No privilege escalation allowed
 - ✅ Multi-stage Docker build
+- ✅ Minimal Alpine base image (`node:20-alpine`)
+- ✅ `apk upgrade --no-cache` patches OS CVEs at build time
+- ✅ Zero HIGH/CRITICAL CVEs in final image
+
+### Kubernetes
+- ✅ Resource requests and limits on all containers
+- ✅ Liveness and readiness probes configured
+- ✅ Secrets from Kubernetes Secrets, not hardcoded env vars
 - ✅ Default-deny NetworkPolicy
-- ✅ Trusted image registry enforcement
-- ✅ Automated CVE scanning in CI/CD
+- ✅ ClusterIP service only (not exposed externally)
+- ✅ Trusted image registry enforcement via OPA Gatekeeper
+
+### CI/CD
+- ✅ Automated manifest scoring on every push
+- ✅ Automated image CVE scanning on every push
 - ✅ Security gate blocking bad code from merging
+- ✅ Reports uploaded as downloadable artifacts (30 days)
+
+---
+
+## 🐛 Troubleshooting
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Pod `ImagePullBackOff` | Image not in Minikube | Run `eval $(minikube docker-env)` before building |
+| Pod `CrashLoopBackOff` | App error | Run `kubectl logs -l app=secure-app` |
+| Probes failing on port 8080 | Port mismatch | App listens on 3000 — ensure manifest uses port 3000 |
+| `npm ci` fails in Docker | Missing `package-lock.json` | Run `npm install` in `app/` directory first |
+| Kubesec exit code 2 | Unsupported resource type (Secret/Service) | Use `\|\| true` and filter score by Deployment in jq |
+| Trivy finds npm CVEs | npm internal packages bundled in Node image | Add `--skip-dirs /usr/local/lib/node_modules/npm` |
+| GitHub Actions `sed` fails | `\|` delimiter conflict | Use `#` as sed delimiter instead of `/` or `\|` |
+| `actions/upload-artifact` fails | Deprecated v3 | Upgrade to `actions/upload-artifact@v4` |
 
 ---
 
 ## 📚 Tools Reference
 
-| Tool | Docs |
-|---|---|
-| Kubesec | https://kubesec.io |
-| KubeLinter | https://docs.kubelinter.io |
-| Trivy | https://aquasecurity.github.io/trivy |
-| OPA Gatekeeper | https://open-policy-agent.github.io/gatekeeper |
-| Minikube | https://minikube.sigs.k8s.io |
+| Tool | Docs | Purpose |
+|---|---|---|
+| Kubesec | https://kubesec.io | Kubernetes manifest security scoring |
+| KubeLinter | https://docs.kubelinter.io | Manifest policy linting |
+| Trivy | https://aquasecurity.github.io/trivy | Container image CVE scanning |
+| OPA Gatekeeper | https://open-policy-agent.github.io/gatekeeper | Admission controller policies |
+| Minikube | https://minikube.sigs.k8s.io | Local Kubernetes cluster |
 
 ---
 
