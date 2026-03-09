@@ -46,19 +46,20 @@ jobs:
         echo "Running Kubesec analysis..."
         GATE_FAILED=false
 
-        # Only scan Deployment-type manifests - kubesec does not support NetworkPolicy
-        SUPPORTED=("secure-app.yaml" "vulnerable-app.yaml")
-
-        for filename in "${SUPPORTED[@]}"; do
-          file="manifests/$filename"
+        for file in manifests/secure-app.yaml manifests/vulnerable-app.yaml; do
           if [ -f "$file" ]; then
             name=$(basename "$file" .yaml)
             echo "  Scanning $name..."
-            kubesec scan "$file" > "reports/kubesec-${name}.json"
-            score=$(jq -r '.[0].score // "N/A"' "reports/kubesec-${name}.json")
-            echo "  Score for $name: $score"
+
+            # Use || true to ignore exit code 2 caused by unsupported resource types
+            kubesec scan "$file" > "reports/kubesec-${name}.json" || true
+
+            # Only check score of Deployment resources (skip Secret/Service)
+            score=$(jq -r '[.[] | select(.object | startswith("Deployment"))] | .[0].score // "N/A"' "reports/kubesec-${name}.json")
+            echo "  Deployment score for $name: $score"
+
             if [ "$score" != "N/A" ] && [ "$score" -lt 0 ]; then
-              echo "::error::$name has a negative security score: $score"
+              echo "::error::$name deployment has a negative security score: $score"
               GATE_FAILED=true
             fi
           fi
@@ -127,7 +128,7 @@ jobs:
         for file in reports/kubesec-*.json; do
           [ -f "$file" ] || continue
           name=$(basename "$file" .json)
-          score=$(jq -r '.[0].score // "N/A"' "$file")
+          score=$(jq -r '[.[] | select(.object | startswith("Deployment"))] | .[0].score // "N/A"' "$file")
           echo "Kubesec | $name | score: $score"
         done
         for file in reports/trivy-*.json; do
