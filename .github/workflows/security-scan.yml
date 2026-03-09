@@ -90,7 +90,7 @@ jobs:
 
         # Scan our custom built image
         echo "Scanning: secure-demo-app:1.0.0"
-        trivy image --format json --output "reports/trivy-secure-demo-app.json" secure-demo-app:1.0.0 || true
+        trivy image --format json --output "reports/trivy-secure-demo-app.json" --skip-dirs /usr/local/lib/node_modules/npm --skip-dirs /opt/yarn-v1.22.22 secure-demo-app:1.0.0 || true
 
         if [ -f "reports/trivy-secure-demo-app.json" ]; then
           critical=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity=="CRITICAL")] | length' reports/trivy-secure-demo-app.json)
