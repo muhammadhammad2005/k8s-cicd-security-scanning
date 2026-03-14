@@ -3,6 +3,17 @@
 MANIFEST_DIR="manifests"
 REPORT_DIR="reports"
 
+# Check dependencies
+if ! command -v kube-linter &> /dev/null; then
+    echo "Error: kube-linter is not installed. Please install it first."
+    exit 1
+fi
+
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is not installed. Please install it first."
+    exit 1
+fi
+
 echo "Starting KubeLinter security analysis..."
 mkdir -p $REPORT_DIR
 
@@ -16,7 +27,7 @@ echo "==============="
 if [ -f "$REPORT_DIR/kubelinter-full.json" ]; then
     total_issues=$(cat $REPORT_DIR/kubelinter-full.json | jq '.Issues | length')
     echo "Total issues found: $total_issues"
-    
+
     echo "Issues by type:"
     cat $REPORT_DIR/kubelinter-full.json | jq -r '.Issues[] | .Check' | sort | uniq -c | sort -nr
 else
