@@ -1,4 +1,4 @@
-# k8s-cicd-security-scanning
+# Kubernetes CI/CD Security Scanning & DevSecOps Pipeline
 
 A production-ready DevSecOps project demonstrating how to integrate static security analysis, container image scanning, and compliance enforcement directly into a Kubernetes CI/CD pipeline — using **Kubesec**, **KubeLinter**, and **Trivy**, automated via **GitHub Actions**.
 
@@ -491,6 +491,13 @@ kubectl run test --image=docker.io/nginx:1.21-alpine
 | Trivy | https://aquasecurity.github.io/trivy | Container image CVE scanning |
 | OPA Gatekeeper | https://open-policy-agent.github.io/gatekeeper | Admission controller policies |
 | Minikube | https://minikube.sigs.k8s.io | Local Kubernetes cluster |
+
+## Skills demonstrated:
+- Kubernetes cluster hardening & manifest security
+- DevSecOps CI/CD pipelines
+- Container image vulnerability scanning
+- OPA Gatekeeper policy enforcement
+- Automation using GitHub Actions & Bash
 
 ---
 
